@@ -8,31 +8,45 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.lang.reflect.Method;
+import java.io.File;
+import java.util.HashMap;
+import java.util.Map;
 
 public class FrontServlet extends HttpServlet {
 
     RequestDispatcher defaultDispatcher;
+    private Scanner scanner = new Scanner();
 
     @Override
     public void init() {
         defaultDispatcher = getServletContext().getNamedDispatcher("default");
+        try {
+            String classesPath = getServletContext().getRealPath("/WEB-INF/classes");
+            scanner.scanControllers(new File(classesPath), "");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
     protected void service(HttpServletRequest req, HttpServletResponse res) throws ServletException, IOException {
         String path = req.getRequestURI().substring(req.getContextPath().length());
-        
         try {
-            boolean resourceExists = getServletContext().getResource(path) != null;
-
-            if (resourceExists) {
-                defaultServe(req, res);
+            if (scanner.urlToMethod.containsKey(path)) {
+                Method method = scanner.urlToMethod.get(path);
+                Class<?> controllerClass = method.getDeclaringClass();
+                Object controllerInstance = controllerClass.getDeclaredConstructor().newInstance();
+                method.invoke(controllerInstance);
+                res.setContentType("text/plain");
+                res.getWriter().println("Méthode appelée pour l'URL : " + path);
             } else {
-                customServe(req, res);
+                res.setContentType("text/plain");
+                res.getWriter().println("URL non supportée : " + path);
             }
         } catch (Exception e) {
-            // En cas d'erreur, considérer que la ressource n'existe pas
-            customServe(req, res);
+            res.setContentType("text/plain");
+            res.getWriter().println("Erreur lors de l'appel de la méthode : " + e.getMessage());
         }
     }
 
