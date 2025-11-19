@@ -25,6 +25,8 @@ public class FrontServlet extends HttpServlet {
             Scanner scanner = new Scanner();
             scanner.scanControllers(new File(classesPath), "");
             getServletContext().setAttribute("urlToMethod", scanner.urlToMethod);
+            getServletContext().setAttribute("urlPatternToMethod", scanner.urlPatternToMethod);
+
             System.out.println("Framework initialisé. URLs: " + scanner.urlToMethod.keySet());
         } catch (Exception e) {
             e.printStackTrace();
@@ -36,14 +38,44 @@ public class FrontServlet extends HttpServlet {
     protected void service(HttpServletRequest req, HttpServletResponse res) throws ServletException, IOException {
         String path = req.getRequestURI().substring(req.getContextPath().length());
         Map<String, Method> urlToMethod = (Map<String, Method>) getServletContext().getAttribute("urlToMethod");
+        Map<String, Method> urlPatternToMethod = (Map<String, Method>) getServletContext().getAttribute("urlPatternToMethod");
 
         try {
+            Method method = null;
+            Object[] args = new Object[0];
             if (urlToMethod != null && urlToMethod.containsKey(path)) {
-                Method method = urlToMethod.get(path);
+                method = urlToMethod.get(path);
+            }
+
+            else if (urlPatternToMethod != null){
+                for (String pattern : urlPatternToMethod.keySet()) {
+                    // Ex: /etudiant/{id} -> /etudiant/25
+                    String regex = pattern.replaceAll("\\{[^/]+\\}", "([^/]+)");
+                    if (path.matches(regex)) {
+                        method = urlPatternToMethod.get(pattern);
+                        // Extraire la valeur dynamique
+                        String[] pathParts = path.split("/");
+                        String[] patternParts = pattern.split("/");
+                        for (int i = 0; i < patternParts.length; i++) {
+                            if (patternParts[i].startsWith("{") && patternParts[i].endsWith("}")) {
+                                String value = pathParts[i];
+                                // Conversion automatique si int attendu
+                                if (method.getParameterTypes().length == 1 && method.getParameterTypes()[0] == int.class) {
+                                    args = new Object[]{Integer.parseInt(value)};
+                                } else {
+                                    args = new Object[]{value};
+                                }
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            if (method != null) {
                 Class<?> controllerClass = method.getDeclaringClass();
                 Object controllerInstance = controllerClass.getDeclaredConstructor().newInstance();
-                Object result = method.invoke(controllerInstance);
-                // passer req pour pouvoir forwarder si ModelView
+                Object result = method.invoke(controllerInstance, args);
                 handleResult(result, path, req, res);
             } else {
                 res.setContentType("text/html; charset=UTF-8");
@@ -79,6 +111,14 @@ public class FrontServlet extends HttpServlet {
                 res.getWriter().println("Erreur: Aucune vue spécifiée dans ModelView");
                 return;
             }
+
+            //eto mipasse donnees am requete
+            if(mv.getData() != null){
+                for(Map.Entry<String, Object> entry: mv.getData().entrySet()) {
+                    req.setAttribute(entry.getKey(), entry.getValue());
+                }
+            }
+
             RequestDispatcher dispatcher = getServletContext().getRequestDispatcher("/" + viewPath);
             if (dispatcher != null) {
                 dispatcher.forward(req, res);

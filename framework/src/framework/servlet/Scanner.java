@@ -5,11 +5,14 @@ import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
 import framework.annotation.Controller;
-import framework.annotation.MyAnnotation;
+import framework.annotation.Url;
 
 public class Scanner {
     // Une seule map : URL complète -> méthode
     public Map<String, Method> urlToMethod = new HashMap<>();
+
+    // Map pour les patterns dynamiques : "/etudiant/{id}" -> méthode
+    public Map<String, Method> urlPatternToMethod = new HashMap<>();
 
     public void scanControllers(File dir, String packageName) throws Exception {
         if (!dir.exists()) return;
@@ -36,10 +39,14 @@ public class Scanner {
             String baseUrl = ctrlAnn.value();
             
             for (Method method : clazz.getDeclaredMethods()) {
-                if (method.isAnnotationPresent(MyAnnotation.class)) {
-                    MyAnnotation ann = method.getAnnotation(MyAnnotation.class);
+                if (method.isAnnotationPresent(Url.class)) {
+                    Url ann = method.getAnnotation(Url.class);
                     String fullUrl = baseUrl + ann.value();
-                    urlToMethod.put(fullUrl, method);
+                    if (fullUrl.contains("{") && fullUrl.contains("}")) {
+                        urlPatternToMethod.put(fullUrl, method);
+                    } else {
+                        urlToMethod.put(fullUrl, method);
+                    }
                 }
             }
         }
