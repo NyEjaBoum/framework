@@ -10,6 +10,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.lang.reflect.Method;
 import java.io.File;
 import java.util.Map;
+import java.lang.reflect.Parameter;
+import framework.annotation.ParametreRequete;
 import framework.view.ModelView;
 
 public class FrontServlet extends HttpServlet {
@@ -72,20 +74,63 @@ public class FrontServlet extends HttpServlet {
                     }
                 }
             }
+            
             if (method != null) {
                 Class<?> controllerClass = method.getDeclaringClass();
                 Object controllerInstance = controllerClass.getDeclaredConstructor().newInstance();
-                Object result = method.invoke(controllerInstance, args);
+
+                // construire args pour l'appel : priorité -> @ParametreRequete -> valeurs d'URL (args) -> req.getParameter(nom)
+                Parameter[] params = method.getParameters();
+                Object[] invokedArgs = new Object[params.length];
+
+                // route args extraits plus haut (args)
+                Object[] routeArgs = args != null ? args : new Object[0];
+                int routeIdx = 0;
+
+                for (int i = 0; i < params.length; i++) {
+                    Parameter p = params[i];
+                    Class<?> type = p.getType();
+                    Object value = null;
+
+                    // 1) annotation explicite
+                    if (p.isAnnotationPresent(ParametreRequete.class)) {
+                        String name = p.getAnnotation(ParametreRequete.class).value();
+                        String s = req.getParameter(name);
+                        if (s != null) value = convertString(s, type);
+                    }
+
+                    // 2) valeur provenant de l'URL (route)
+                    if (value == null && routeIdx < routeArgs.length) {
+                        Object r = routeArgs[routeIdx++];
+                        if (r != null) {
+                            if (type == int.class || type == Integer.class) {
+                                value = (r instanceof Number) ? ((Number) r).intValue() : Integer.parseInt(r.toString());
+                            } else {
+                                value = r.toString();
+                            }
+                        }
+                    }
+
+                    // 3) fallback : param formulaire / query-string (nom du paramètre)
+                    if (value == null) {
+                        String name = p.getName(); // si pas de -parameters, prefère @ParametreRequete
+                        String s = req.getParameter(name);
+                        if (s != null) value = convertString(s, type);
+                    }
+
+                    invokedArgs[i] = value;
+                }
+
+                Object result = method.invoke(controllerInstance, invokedArgs);
                 handleResult(result, path, req, res);
             } else {
-                res.setContentType("text/html; charset=UTF-8");
-                res.setStatus(HttpServletResponse.SC_NOT_FOUND);
-                res.getWriter().println("<h1>URL non supportée: " + path + "</h1>");
+                // déléguer la réponse 404 à ViewHandler (limite HTML ici)
+                ViewHandler.handleNotFound(path, req, res);
             }
+
         } catch (Exception e) {
-            res.setContentType("text/plain");
-            res.getWriter().println("Erreur: " + e.getMessage());
-            e.printStackTrace();
+            // déléguer la gestion d'erreur à ViewHandler
+            ViewHandler.handleException(e, path, req, res);
         }
     }
 
@@ -104,33 +149,22 @@ public class FrontServlet extends HttpServlet {
         }
 
         if (result instanceof ModelView) {
-            ModelView mv = (ModelView) result;
-            String viewPath = mv.getView();
-            if (viewPath == null || viewPath.isEmpty()) {
-                res.setContentType("text/plain; charset=UTF-8");
-                res.getWriter().println("Erreur: Aucune vue spécifiée dans ModelView");
-                return;
-            }
-
-            //eto mipasse donnees am requete
-            if(mv.getData() != null){
-                for(Map.Entry<String, Object> entry: mv.getData().entrySet()) {
-                    req.setAttribute(entry.getKey(), entry.getValue());
-                }
-            }
-
-            RequestDispatcher dispatcher = getServletContext().getRequestDispatcher("/" + viewPath);
-            if (dispatcher != null) {
-                dispatcher.forward(req, res);
-            } else {
-                res.setContentType("text/plain; charset=UTF-8");
-                res.getWriter().println("Erreur: Vue non trouvée - " + viewPath);
-            }
+            ViewHandler.handle((ModelView) result, req, res);
             return;
         }
 
         // Autres types (int, etc.)
         res.setContentType("text/plain; charset=UTF-8");
         res.getWriter().println("Résultat (" + result.getClass().getSimpleName() + "): " + result);
+    }
+
+    private Object convertString(String s, Class<?> target) {
+        if (s == null) return null;
+        if (target == String.class) return s;
+        if (target == int.class || target == Integer.class) return Integer.parseInt(s);
+        if (target == long.class || target == Long.class) return Long.parseLong(s);
+        if (target == boolean.class || target == Boolean.class) return Boolean.parseBoolean(s);
+        // ajouter selon besoin
+        return s;
     }
 }
