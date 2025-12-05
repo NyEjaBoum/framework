@@ -2,45 +2,38 @@ package framework.servlet;
 
 import java.lang.reflect.Method;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 public class Router {
-    
     public static RouteResult findRoute(String path, Map<String, Method> urlToMethod, Map<String, Method> urlPatternToMethod) {
-        
-        // 1. URL exacte
+
+        // 1) exact
         if (urlToMethod != null && urlToMethod.containsKey(path)) {
-            return new RouteResult(urlToMethod.get(path), new Object[0]);
+            return new RouteResult(urlToMethod.get(path), new HashMap<String,String>());
         }
 
-        // 2. Pattern dynamique
+        // 2) patterns
         if (urlPatternToMethod != null) {
             for (String pattern : urlPatternToMethod.keySet()) {
-                String regex = pattern.replaceAll("\\{[^/]+\\}", "([^/]+)");
-                if (path.matches(regex)) {
+                String regex = "^" + pattern.replaceAll("\\{[^/]+\\}", "([^/]+)") + "$";
+                Pattern p = Pattern.compile(regex);
+                Matcher m = p.matcher(path);
+                if (m.matches()) {
                     Method method = urlPatternToMethod.get(pattern);
-                    Object[] args = extractArgs(path, pattern, method);
-                    return new RouteResult(method, args);
+                    // collect placeholder names in order
+                    List<String> names = new ArrayList<>();
+                    Matcher nameMatcher = Pattern.compile("\\{([^/]+)\\}").matcher(pattern);
+                    while (nameMatcher.find()) names.add(nameMatcher.group(1));
+                    Map<String,String> params = new HashMap<>();
+                    for (int i = 0; i < names.size(); i++) params.put(names.get(i), m.group(i + 1));
+                    return new RouteResult(method, params);
                 }
             }
         }
-
-        return null; // Pas trouvé
-    }
-
-    private static Object[] extractArgs(String path, String pattern, Method method) {
-        String[] pathParts = path.split("/");
-        String[] patternParts = pattern.split("/");
-        
-        for (int i = 0; i < patternParts.length; i++) {
-            if (patternParts[i].startsWith("{") && patternParts[i].endsWith("}")) {
-                String value = pathParts[i];
-                if (method.getParameterTypes().length == 1 && method.getParameterTypes()[0] == int.class) {
-                    return new Object[]{Integer.parseInt(value)};
-                } else {
-                    return new Object[]{value};
-                }
-            }
-        }
-        return new Object[0];
+        return null;
     }
 }

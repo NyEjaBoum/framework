@@ -13,6 +13,7 @@ import java.util.Map;
 import java.lang.reflect.Parameter;
 import framework.annotation.ParametreRequete;
 import framework.view.ModelView;
+import java.util.Collections;
 
 public class FrontServlet extends HttpServlet {
 
@@ -43,38 +44,15 @@ public class FrontServlet extends HttpServlet {
         Map<String, Method> urlPatternToMethod = (Map<String, Method>) getServletContext().getAttribute("urlPatternToMethod");
 
         try {
+            // déléguer routing au Router
+            RouteResult route = Router.findRoute(path, urlToMethod, urlPatternToMethod);
             Method method = null;
-            Object[] args = new Object[0];
-            if (urlToMethod != null && urlToMethod.containsKey(path)) {
-                method = urlToMethod.get(path);
+            Map<String,String> pathParams = Collections.emptyMap();
+            if (route != null) {
+                method = route.method;
+                pathParams = route.pathParams != null ? route.pathParams : Collections.emptyMap();
             }
 
-            else if (urlPatternToMethod != null){
-                for (String pattern : urlPatternToMethod.keySet()) {
-                    // Ex: /etudiant/{id} -> /etudiant/25
-                    String regex = pattern.replaceAll("\\{[^/]+\\}", "([^/]+)");
-                    if (path.matches(regex)) {
-                        method = urlPatternToMethod.get(pattern);
-                        // Extraire la valeur dynamique
-                        String[] pathParts = path.split("/");
-                        String[] patternParts = pattern.split("/");
-                        for (int i = 0; i < patternParts.length; i++) {
-                            if (patternParts[i].startsWith("{") && patternParts[i].endsWith("}")) {
-                                String value = pathParts[i];
-                                // Conversion automatique si int attendu
-                                if (method.getParameterTypes().length == 1 && method.getParameterTypes()[0] == int.class) {
-                                    args = new Object[]{Integer.parseInt(value)};
-                                } else {
-                                    args = new Object[]{value};
-                                }
-                                break;
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-            
             if (method != null) {
                 Class<?> controllerClass = method.getDeclaringClass();
                 Object controllerInstance = controllerClass.getDeclaredConstructor().newInstance();
@@ -83,41 +61,34 @@ public class FrontServlet extends HttpServlet {
                 Parameter[] params = method.getParameters();
                 Object[] invokedArgs = new Object[params.length];
 
-                // route args extraits plus haut (args)
-                Object[] routeArgs = args != null ? args : new Object[0];
-                int routeIdx = 0;
-
                 for (int i = 0; i < params.length; i++) {
                     Parameter p = params[i];
                     Class<?> type = p.getType();
                     Object value = null;
+                    String paramName = p.getName(); // requires javac -parameters
 
-                    // 1) annotation explicite
+                    // 1) @ParametreRequete forces request param name
                     if (p.isAnnotationPresent(ParametreRequete.class)) {
                         String name = p.getAnnotation(ParametreRequete.class).value();
                         String s = req.getParameter(name);
                         if (s != null) value = convertString(s, type);
-                    }
-
-                    // 2) valeur provenant de l'URL (route)
-                    if (value == null && routeIdx < routeArgs.length) {
-                        Object r = routeArgs[routeIdx++];
-                        if (r != null) {
-                            if (type == int.class || type == Integer.class) {
-                                value = (r instanceof Number) ? ((Number) r).intValue() : Integer.parseInt(r.toString());
-                            } else {
-                                value = r.toString();
-                            }
+                    } else {
+                        // 2) path param by name (PRIORITY)
+                        if (pathParams.containsKey(paramName)) {
+                            String s = pathParams.get(paramName);
+                            if (s != null) value = convertString(s, type);
+                        }
+                        // 3) fallback query/form param
+                        if (value == null) {
+                            String s = req.getParameter(paramName);
+                            if (s != null) value = convertString(s, type);
                         }
                     }
 
-                    // 3) fallback : param formulaire / query-string (nom du paramètre)
-                    if (value == null) {
-                        String name = p.getName(); // si pas de -parameters, prefère @ParametreRequete
-                        String s = req.getParameter(name);
-                        if (s != null) value = convertString(s, type);
+                    // 4) if still null and primitive -> error
+                    if (value == null && type.isPrimitive()) {
+                        throw new IllegalArgumentException("Paramètre manquant: " + paramName + " (type " + type.getSimpleName() + ")");
                     }
-
                     invokedArgs[i] = value;
                 }
 
