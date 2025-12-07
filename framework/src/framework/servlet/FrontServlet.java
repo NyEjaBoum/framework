@@ -12,6 +12,7 @@ import java.io.File;
 import java.util.Map;
 import java.lang.reflect.Parameter;
 import framework.annotation.ParametreRequete;
+import framework.annotation.VariableChemin;
 import framework.view.ModelView;
 import java.util.Collections;
 
@@ -67,27 +68,40 @@ public class FrontServlet extends HttpServlet {
                     Object value = null;
                     String paramName = p.getName(); // requires javac -parameters
 
-                    // 1) @ParametreRequete forces request param name
-                    if (p.isAnnotationPresent(ParametreRequete.class)) {
-                        String name = p.getAnnotation(ParametreRequete.class).value();
-                        String s = req.getParameter(name);
+                    // 1. VariableChemin
+                    if (p.isAnnotationPresent(VariableChemin.class)) {
+                        VariableChemin ann = p.getAnnotation(VariableChemin.class);
+                        String key = ann.value().isEmpty() ? p.getName() : ann.value();
+                        String s = pathParams.get(key);
                         if (s != null) value = convertString(s, type);
-                    } else {
-                        // 2) path param by name (PRIORITY)
-                        if (pathParams.containsKey(paramName)) {
-                            String s = pathParams.get(paramName);
-                            if (s != null) value = convertString(s, type);
-                        }
-                        // 3) fallback query/form param
-                        if (value == null) {
-                            String s = req.getParameter(paramName);
-                            if (s != null) value = convertString(s, type);
+                        if (value == null && ann.required()) {
+                            throw new IllegalArgumentException("Paramètre de chemin manquant: " + key + " (type " + type.getSimpleName() + ")");
                         }
                     }
-
-                    // 4) if still null and primitive -> error
-                    if (value == null && type.isPrimitive()) {
-                        throw new IllegalArgumentException("Paramètre manquant: " + paramName + " (type " + type.getSimpleName() + ")");
+                    // 2. ParametreRequete
+                    else if (p.isAnnotationPresent(ParametreRequete.class)) {
+                        ParametreRequete ann = p.getAnnotation(ParametreRequete.class);
+                        String key = ann.value().isEmpty() ? p.getName() : ann.value();
+                        String s = req.getParameter(key);
+                        if (s != null) value = convertString(s, type);
+                        if (value == null && ann.required()) {
+                            throw new IllegalArgumentException("Paramètre de requête manquant: " + key + " (type " + type.getSimpleName() + ")");
+                        }
+                    }
+                    // 3. Aucun annotation : priorité chemin > requête
+                    else {
+                        String key = p.getName();
+                        if (pathParams.containsKey(key)) {
+                            String s = pathParams.get(key);
+                            if (s != null) value = convertString(s, type);
+                        }
+                        if (value == null) {
+                            String s = req.getParameter(key);
+                            if (s != null) value = convertString(s, type);
+                        }
+                        if (value == null && type.isPrimitive()) {
+                            throw new IllegalArgumentException("Paramètre manquant: " + key + " (type " + type.getSimpleName() + ")");
+                        }
                     }
                     invokedArgs[i] = value;
                 }
