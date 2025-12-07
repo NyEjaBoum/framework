@@ -1,46 +1,46 @@
 package framework.servlet;
 
-import java.lang.reflect.Method;
-import java.util.Map;
+import java.util.*;
+import java.util.regex.*;
 
 public class Router {
-    
-    public static RouteResult findRoute(String path, Map<String, Method> urlToMethod, Map<String, Method> urlPatternToMethod) {
-        
-        // 1. URL exacte
-        if (urlToMethod != null && urlToMethod.containsKey(path)) {
-            return new RouteResult(urlToMethod.get(path), new Object[0]);
-        }
-
-        // 2. Pattern dynamique
-        if (urlPatternToMethod != null) {
-            for (String pattern : urlPatternToMethod.keySet()) {
-                String regex = pattern.replaceAll("\\{[^/]+\\}", "([^/]+)");
-                if (path.matches(regex)) {
-                    Method method = urlPatternToMethod.get(pattern);
-                    Object[] args = extractArgs(path, pattern, method);
-                    return new RouteResult(method, args);
+    public static RouteResult findRoute(String path, String httpMethod, Map<String, List<InfoUrl>> urlToInfoList) {
+        // 1) exact
+        if (urlToInfoList != null && urlToInfoList.containsKey(path)) {
+            for (InfoUrl info : urlToInfoList.get(path)) {
+                if (info.supportsMethod(httpMethod)) {
+                    return new RouteResult(info.method, new HashMap<String, String>());
                 }
             }
+            // 405 si aucune méthode correspond
+            Set<String> allowed = new HashSet<>();
+            for (InfoUrl info : urlToInfoList.get(path)) allowed.addAll(info.httpMethods);
+            return new RouteResult(null, allowed);
         }
 
-        return null; // Pas trouvé
-    }
-
-    private static Object[] extractArgs(String path, String pattern, Method method) {
-        String[] pathParts = path.split("/");
-        String[] patternParts = pattern.split("/");
-        
-        for (int i = 0; i < patternParts.length; i++) {
-            if (patternParts[i].startsWith("{") && patternParts[i].endsWith("}")) {
-                String value = pathParts[i];
-                if (method.getParameterTypes().length == 1 && method.getParameterTypes()[0] == int.class) {
-                    return new Object[]{Integer.parseInt(value)};
-                } else {
-                    return new Object[]{value};
+        // 2) patterns
+        for (String pattern : urlToInfoList.keySet()) {
+            String regex = "^" + pattern.replaceAll("\\{[^/]+\\}", "([^/]+)") + "$";
+            Pattern p = Pattern.compile(regex);
+            Matcher m = p.matcher(path);
+            if (m.matches()) {
+                for (InfoUrl info : urlToInfoList.get(pattern)) {
+                    if (info.supportsMethod(httpMethod)) {
+                        // collect placeholder names in order
+                        List<String> names = new ArrayList<>();
+                        Matcher nameMatcher = Pattern.compile("\\{([^/]+)\\}").matcher(pattern);
+                        while (nameMatcher.find()) names.add(nameMatcher.group(1));
+                        Map<String, String> params = new HashMap<>();
+                        for (int i = 0; i < names.size(); i++) params.put(names.get(i), m.group(i + 1));
+                        return new RouteResult(info.method, params);
+                    }
                 }
+                // 405 si aucune méthode correspond
+                Set<String> allowed = new HashSet<>();
+                for (InfoUrl info : urlToInfoList.get(pattern)) allowed.addAll(info.httpMethods);
+                return new RouteResult(null, allowed);
             }
         }
-        return new Object[0];
+        return null;
     }
 }
