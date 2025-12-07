@@ -12,7 +12,9 @@ import java.io.File;
 import java.util.Map;
 import java.lang.reflect.Parameter;
 import framework.annotation.ParametreRequete;
+import framework.annotation.VariableChemin;
 import framework.view.ModelView;
+import java.util.Collections;
 
 public class FrontServlet extends HttpServlet {
 
@@ -43,38 +45,15 @@ public class FrontServlet extends HttpServlet {
         Map<String, Method> urlPatternToMethod = (Map<String, Method>) getServletContext().getAttribute("urlPatternToMethod");
 
         try {
+            // déléguer routing au Router
+            RouteResult route = Router.findRoute(path, urlToMethod, urlPatternToMethod);
             Method method = null;
-            Object[] args = new Object[0];
-            if (urlToMethod != null && urlToMethod.containsKey(path)) {
-                method = urlToMethod.get(path);
+            Map<String,String> pathParams = Collections.emptyMap();
+            if (route != null) {
+                method = route.method;
+                pathParams = route.pathParams != null ? route.pathParams : Collections.emptyMap();
             }
 
-            else if (urlPatternToMethod != null){
-                for (String pattern : urlPatternToMethod.keySet()) {
-                    // Ex: /etudiant/{id} -> /etudiant/25
-                    String regex = pattern.replaceAll("\\{[^/]+\\}", "([^/]+)");
-                    if (path.matches(regex)) {
-                        method = urlPatternToMethod.get(pattern);
-                        // Extraire la valeur dynamique
-                        String[] pathParts = path.split("/");
-                        String[] patternParts = pattern.split("/");
-                        for (int i = 0; i < patternParts.length; i++) {
-                            if (patternParts[i].startsWith("{") && patternParts[i].endsWith("}")) {
-                                String value = pathParts[i];
-                                // Conversion automatique si int attendu
-                                if (method.getParameterTypes().length == 1 && method.getParameterTypes()[0] == int.class) {
-                                    args = new Object[]{Integer.parseInt(value)};
-                                } else {
-                                    args = new Object[]{value};
-                                }
-                                break;
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-            
             if (method != null) {
                 Class<?> controllerClass = method.getDeclaringClass();
                 Object controllerInstance = controllerClass.getDeclaredConstructor().newInstance();
@@ -83,41 +62,46 @@ public class FrontServlet extends HttpServlet {
                 Parameter[] params = method.getParameters();
                 Object[] invokedArgs = new Object[params.length];
 
-                // route args extraits plus haut (args)
-                Object[] routeArgs = args != null ? args : new Object[0];
-                int routeIdx = 0;
-
                 for (int i = 0; i < params.length; i++) {
                     Parameter p = params[i];
                     Class<?> type = p.getType();
                     Object value = null;
 
-                    // 1) annotation explicite
-                    if (p.isAnnotationPresent(ParametreRequete.class)) {
-                        String name = p.getAnnotation(ParametreRequete.class).value();
-                        String s = req.getParameter(name);
+                    // 1. VariableChemin
+                    if (p.isAnnotationPresent(VariableChemin.class)) {
+                        VariableChemin ann = p.getAnnotation(VariableChemin.class);
+                        String key = ann.value().isEmpty() ? p.getName() : ann.value();
+                        String s = pathParams.get(key);
                         if (s != null) value = convertString(s, type);
-                    }
-
-                    // 2) valeur provenant de l'URL (route)
-                    if (value == null && routeIdx < routeArgs.length) {
-                        Object r = routeArgs[routeIdx++];
-                        if (r != null) {
-                            if (type == int.class || type == Integer.class) {
-                                value = (r instanceof Number) ? ((Number) r).intValue() : Integer.parseInt(r.toString());
-                            } else {
-                                value = r.toString();
-                            }
+                        if (value == null && ann.required()) {
+                            throw new IllegalArgumentException("Paramètre de chemin manquant: " + key + " (type " + type.getSimpleName() + ")");
                         }
                     }
-
-                    // 3) fallback : param formulaire / query-string (nom du paramètre)
-                    if (value == null) {
-                        String name = p.getName(); // si pas de -parameters, prefère @ParametreRequete
-                        String s = req.getParameter(name);
+                    // 2. ParametreRequete
+                    else if (p.isAnnotationPresent(ParametreRequete.class)) {
+                        ParametreRequete ann = p.getAnnotation(ParametreRequete.class);
+                        String key = ann.value().isEmpty() ? p.getName() : ann.value();
+                        String s = req.getParameter(key);
                         if (s != null) value = convertString(s, type);
+                        if (value == null && ann.required()) {
+                            throw new IllegalArgumentException("Paramètre de requête manquant: " + key + " (type " + type.getSimpleName() + ")");
+                        }
                     }
-
+                    // 3. Aucun annotation : priorité chemin > requête
+                    else {
+                        String key = p.getName();
+                        if (pathParams.containsKey(key)) {
+                            String s = pathParams.get(key);
+                            if (s != null) value = convertString(s, type);
+                        }
+                        if (value == null) {
+                            String s = req.getParameter(key);
+                            if (s != null) value = convertString(s, type);
+                        }
+                        if (value == null && type.isPrimitive()) {
+                            throw new IllegalArgumentException("Paramètre manquant: " + key + " (type " + type.getSimpleName() + ")");
+                        }
+                    }
                     invokedArgs[i] = value;
                 }
 
