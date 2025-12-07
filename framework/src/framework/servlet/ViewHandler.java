@@ -10,6 +10,7 @@ import framework.view.ModelView;
 import java.io.IOException;
 import java.util.Map;
 import java.io.PrintWriter;
+import java.util.Set;
 
 public class ViewHandler {
 
@@ -26,6 +27,10 @@ public class ViewHandler {
                 req.setAttribute(entry.getKey(), entry.getValue());
             }
         }
+        // Passer le message à la requête
+        if (mv.getMessage() != null) {
+            req.setAttribute("message", mv.getMessage());
+        }
 
         // Essayer de forward vers la JSP
         RequestDispatcher dispatcher = req.getServletContext().getRequestDispatcher("/" + viewPath);
@@ -37,6 +42,9 @@ public class ViewHandler {
         // Fallback : afficher le nom de la vue et les données en HTML
         StringBuilder body = new StringBuilder();
         body.append("<h2>Vue demandée : ").append(escape(viewPath)).append("</h2>");
+        if (mv.getMessage() != null) {
+            body.append("<div class='info'>").append(escape(mv.getMessage())).append("</div>");
+        }
         if (mv.getData() != null && !mv.getData().isEmpty()) {
             body.append("<h3>Données transmises :</h3><ul>");
             for (Map.Entry<String, Object> entry : mv.getData().entrySet()) {
@@ -70,6 +78,14 @@ public class ViewHandler {
             .append("<p>URL : <code>").append(escape(path)).append("</code></p>");
         renderHtml(res, "Erreur serveur", body.toString());
         res.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+    }
+
+    public static void show405(String path, Set<String> allowed, HttpServletRequest req, HttpServletResponse res) throws IOException {
+        res.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+        String body = "<h2 class='error'>405 - Method Not Allowed</h2>"
+            + "<p>Méthodes autorisées : <b>" + String.join(", ", allowed) + "</b></p>"
+            + "<code>" + escape(path) + "</code>";
+        renderHtml(res, "405 - Method Not Allowed", body);
     }
 
     private static void renderHtml(HttpServletResponse res, String title, String bodyContent) throws IOException {
