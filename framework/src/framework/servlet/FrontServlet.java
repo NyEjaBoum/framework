@@ -72,6 +72,7 @@ public class FrontServlet extends HttpServlet {
                     Parameter p = params[i];
                     Class<?> type = p.getType();
                     Object value = null;
+                    String paramName = p.getName(); // requires javac -parameters
 
                     // 1. VariableChemin
                     if (p.isAnnotationPresent(VariableChemin.class)) {
