@@ -17,6 +17,7 @@ import framework.view.ModelView;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.HashMap;
 
 public class FrontServlet extends HttpServlet {
 
@@ -72,10 +73,25 @@ public class FrontServlet extends HttpServlet {
                     Parameter p = params[i];
                     Class<?> type = p.getType();
                     Object value = null;
-                    String paramName = p.getName(); // requires javac -parameters
 
+                    // Injection automatique de tous les paramètres de requête dans Map<String,Object>
+                    if (Map.class.isAssignableFrom(type)) {
+                        Map<String, Object> paramMap = new HashMap<>();
+                        Map<String, String[]> paramValues = req.getParameterMap();
+                        for (Map.Entry<String, String[]> entry : paramValues.entrySet()) {
+                            String key = entry.getKey();
+                            String[] vals = entry.getValue();
+                            if (vals == null) continue;
+                            if (vals.length == 1) {
+                                paramMap.put(key, vals[0]);
+                            } else {
+                                paramMap.put(key, vals);
+                            }
+                        }
+                        value = paramMap;
+                    }
                     // 1. VariableChemin
-                    if (p.isAnnotationPresent(VariableChemin.class)) {
+                    else if (p.isAnnotationPresent(VariableChemin.class)) {
                         VariableChemin ann = p.getAnnotation(VariableChemin.class);
                         String key = ann.value().isEmpty() ? p.getName() : ann.value();
                         String s = pathParams.get(key);
