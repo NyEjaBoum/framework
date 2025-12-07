@@ -15,10 +15,14 @@ import framework.annotation.ParametreRequete;
 import framework.annotation.VariableChemin;
 import framework.view.ModelView;
 import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.HashMap;
 
 public class FrontServlet extends HttpServlet {
 
     RequestDispatcher defaultDispatcher;
+    private Map<String, List<InfoUrl>> urlToInfoList; // Ajouté
 
     @Override
     public void init() {
@@ -28,10 +32,10 @@ public class FrontServlet extends HttpServlet {
             String classesPath = getServletContext().getRealPath("/WEB-INF/classes");
             Scanner scanner = new Scanner();
             scanner.scanControllers(new File(classesPath), "");
-            getServletContext().setAttribute("urlToMethod", scanner.urlToMethod);
-            getServletContext().setAttribute("urlPatternToMethod", scanner.urlPatternToMethod);
+            urlToInfoList = scanner.urlToInfoList; // Correction : stocker la map dans l'attribut
+            getServletContext().setAttribute("urlToInfoList", urlToInfoList);
 
-            System.out.println("Framework initialisé. URLs: " + scanner.urlToMethod.keySet());
+            System.out.println("Framework initialisé. URLs: " + urlToInfoList.keySet());
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -41,12 +45,15 @@ public class FrontServlet extends HttpServlet {
     @SuppressWarnings("unchecked")
     protected void service(HttpServletRequest req, HttpServletResponse res) throws ServletException, IOException {
         String path = req.getRequestURI().substring(req.getContextPath().length());
-        Map<String, Method> urlToMethod = (Map<String, Method>) getServletContext().getAttribute("urlToMethod");
-        Map<String, Method> urlPatternToMethod = (Map<String, Method>) getServletContext().getAttribute("urlPatternToMethod");
+        String httpMethod = req.getMethod();
+
+        // Correction : récupérer la map depuis l'attribut ou l'attribut de classe
+        Map<String, List<InfoUrl>> urlToInfoList = (Map<String, List<InfoUrl>>) getServletContext().getAttribute("urlToInfoList");
+        if (urlToInfoList == null) urlToInfoList = this.urlToInfoList;
 
         try {
             // déléguer routing au Router
-            RouteResult route = Router.findRoute(path, urlToMethod, urlPatternToMethod);
+            RouteResult route = Router.findRoute(path, httpMethod, urlToInfoList);
             Method method = null;
             Map<String,String> pathParams = Collections.emptyMap();
             if (route != null) {
@@ -66,10 +73,25 @@ public class FrontServlet extends HttpServlet {
                     Parameter p = params[i];
                     Class<?> type = p.getType();
                     Object value = null;
-                    String paramName = p.getName(); // requires javac -parameters
 
+                    // Injection automatique de tous les paramètres de requête dans Map<String,Object>
+                    if (Map.class.isAssignableFrom(type)) {
+                        Map<String, Object> paramMap = new HashMap<>();
+                        Map<String, String[]> paramValues = req.getParameterMap();
+                        for (Map.Entry<String, String[]> entry : paramValues.entrySet()) {
+                            String key = entry.getKey();
+                            String[] vals = entry.getValue();
+                            if (vals == null) continue;
+                            if (vals.length == 1) {
+                                paramMap.put(key, vals[0]);
+                            } else {
+                                paramMap.put(key, vals);
+                            }
+                        }
+                        value = paramMap;
+                    }
                     // 1. VariableChemin
-                    if (p.isAnnotationPresent(VariableChemin.class)) {
+                    else if (p.isAnnotationPresent(VariableChemin.class)) {
                         VariableChemin ann = p.getAnnotation(VariableChemin.class);
                         String key = ann.value().isEmpty() ? p.getName() : ann.value();
                         String s = pathParams.get(key);
@@ -108,6 +130,13 @@ public class FrontServlet extends HttpServlet {
 
                 Object result = method.invoke(controllerInstance, invokedArgs);
                 handleResult(result, path, req, res);
+            } else if (route != null && route.allowedMethods != null) {
+                // 405 Method Not Allowed
+                res.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+                res.setHeader("Allow", String.join(", ", route.allowedMethods));
+                // Correction : ViewHandler.show405 doit exister
+                ViewHandler.show405(path, route.allowedMethods, req, res);
+                return;
             } else {
                 // déléguer la réponse 404 à ViewHandler (limite HTML ici)
                 ViewHandler.handleNotFound(path, req, res);
