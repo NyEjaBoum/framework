@@ -128,6 +128,8 @@ public class FrontServlet extends HttpServlet {
                     invokedArgs[i] = value;
                 }
 
+                req.setAttribute("calledMethod", method);
+
                 Object result = method.invoke(controllerInstance, invokedArgs);
                 handleResult(result, path, req, res);
             } else if (route != null && route.allowedMethods != null) {
@@ -167,6 +169,20 @@ public class FrontServlet extends HttpServlet {
             return;
         }
 
+        // Ajout : gestion JSON
+        Method calledMethod = (Method) req.getAttribute("calledMethod");
+        boolean isJson = false;
+        if (calledMethod != null && calledMethod.isAnnotationPresent(framework.annotation.Json.class)) {
+            isJson = true;
+        }
+
+        if (isJson) {
+            res.setContentType("application/json; charset=UTF-8");
+            String json = toJsonResponse(result);
+            res.getWriter().write(json);
+            return;
+        }
+
         // Autres types (int, etc.)
         res.setContentType("text/plain; charset=UTF-8");
         res.getWriter().println("Résultat (" + result.getClass().getSimpleName() + "): " + result);
@@ -180,5 +196,59 @@ public class FrontServlet extends HttpServlet {
         if (target == boolean.class || target == Boolean.class) return Boolean.parseBoolean(s);
         // ajouter selon besoin
         return s;
+    }
+
+    // Ajoute une méthode utilitaire pour formatter la réponse JSON
+    private String toJsonResponse(Object result) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\n");
+        sb.append("  \"statut\": \"success\",\n");
+        sb.append("  \"code\": 200,\n");
+        if (result instanceof java.util.List) {
+            java.util.List<?> list = (java.util.List<?>) result;
+            sb.append("  \"count\": ").append(list.size()).append(",\n");
+            sb.append("  \"data\": ").append(listToJson(list)).append("\n");
+        } else {
+            sb.append("  \"data\": ").append(objectToJson(result)).append("\n");
+        }
+        sb.append("}");
+        return sb.toString();
+    }
+
+    private String listToJson(java.util.List<?> list) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[");
+        for (int i = 0; i < list.size(); i++) {
+            sb.append(objectToJson(list.get(i)));
+            if (i < list.size() - 1) sb.append(", ");
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    private String objectToJson(Object obj) {
+        if (obj == null) return "null";
+        if (obj instanceof String || obj instanceof Number || obj instanceof Boolean) {
+            return "\"" + obj.toString() + "\"";
+        }
+        // Simple POJO to JSON (fields only, no nested objects)
+        StringBuilder sb = new StringBuilder();
+        sb.append("{");
+        java.lang.reflect.Field[] fields = obj.getClass().getDeclaredFields();
+        for (int i = 0; i < fields.length; i++) {
+            fields[i].setAccessible(true);
+            try {
+                sb.append("\"").append(fields[i].getName()).append("\": ");
+                Object val = fields[i].get(obj);
+                if (val == null) sb.append("null");
+                else if (val instanceof String) sb.append("\"").append(val).append("\"");
+                else sb.append(val.toString());
+            } catch (Exception e) {
+                sb.append("\"error\"");
+            }
+            if (i < fields.length - 1) sb.append(", ");
+        }
+        sb.append("}");
+        return sb.toString();
     }
 }
