@@ -47,12 +47,10 @@ public class FrontServlet extends HttpServlet {
         String path = req.getRequestURI().substring(req.getContextPath().length());
         String httpMethod = req.getMethod();
 
-        // Correction : récupérer la map depuis l'attribut ou l'attribut de classe
         Map<String, List<InfoUrl>> urlToInfoList = (Map<String, List<InfoUrl>>) getServletContext().getAttribute("urlToInfoList");
         if (urlToInfoList == null) urlToInfoList = this.urlToInfoList;
 
         try {
-            // déléguer routing au Router
             RouteResult route = Router.findRoute(path, httpMethod, urlToInfoList);
             Method method = null;
             Map<String,String> pathParams = Collections.emptyMap();
@@ -65,7 +63,6 @@ public class FrontServlet extends HttpServlet {
                 Class<?> controllerClass = method.getDeclaringClass();
                 Object controllerInstance = controllerClass.getDeclaredConstructor().newInstance();
 
-                // construire args pour l'appel : priorité -> @ParametreRequete -> valeurs d'URL (args) -> req.getParameter(nom)
                 Parameter[] params = method.getParameters();
                 Object[] invokedArgs = new Object[params.length];
 
@@ -110,6 +107,10 @@ public class FrontServlet extends HttpServlet {
                             throw new IllegalArgumentException("Paramètre de requête manquant: " + key + " (type " + type.getSimpleName() + ")");
                         }
                     }
+                    // 4. Binding automatique d'objet complexe
+                    else if (isCustomClass(type)) {
+                        value = bindObject(type, req.getParameterMap());
+                    }
                     // 3. Aucun annotation : priorité chemin > requête
                     else {
                         String key = p.getName();
@@ -133,20 +134,63 @@ public class FrontServlet extends HttpServlet {
                 Object result = method.invoke(controllerInstance, invokedArgs);
                 handleResult(result, path, req, res);
             } else if (route != null && route.allowedMethods != null) {
-                // 405 Method Not Allowed
                 res.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
                 res.setHeader("Allow", String.join(", ", route.allowedMethods));
-                // Correction : ViewHandler.show405 doit exister
                 ViewHandler.show405(path, route.allowedMethods, req, res);
                 return;
             } else {
-                // déléguer la réponse 404 à ViewHandler (limite HTML ici)
                 ViewHandler.handleNotFound(path, req, res);
             }
 
         } catch (Exception e) {
-            // déléguer la gestion d'erreur à ViewHandler
             ViewHandler.handleException(e, path, req, res);
+        }
+    }
+
+    // Détection classe personnalisée (hors String, Integer, Map, List, etc.)
+    private boolean isCustomClass(Class<?> type) {
+        return !type.isPrimitive()
+            && !type.getName().startsWith("java.")
+            && !type.isEnum()
+            && !Map.class.isAssignableFrom(type)
+            && !List.class.isAssignableFrom(type);
+    }
+
+    // Binding automatique d'objet complexe (récursif, gère listes et objets imbriqués)
+    private Object bindObject(Class<?> clazz, Map<String, String[]> paramMap) {
+        try {
+            Object instance = clazz.getDeclaredConstructor().newInstance();
+            for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
+                field.setAccessible(true);
+                String prefix = clazz.getSimpleName() + "." + field.getName();
+                Class<?> fieldType = field.getType();
+
+                // Gérer les listes
+                if (List.class.isAssignableFrom(fieldType)) {
+                    String[] vals = paramMap.get(prefix);
+                    if (vals != null) {
+                        List<String> list = new java.util.ArrayList<>();
+                        for (String v : vals) list.add(v);
+                        field.set(instance, list);
+                    }
+                }
+                // Gérer les objets imbriqués
+                else if (isCustomClass(fieldType)) {
+                    Object subObj = bindObject(fieldType, paramMap);
+                    field.set(instance, subObj);
+                }
+                // Attribut simple
+                else {
+                    String[] vals = paramMap.get(prefix);
+                    if (vals != null && vals.length > 0) {
+                        Object converted = convertString(vals[0], fieldType);
+                        field.set(instance, converted);
+                    }
+                }
+            }
+            return instance;
+        } catch (Exception e) {
+            return null;
         }
     }
 
