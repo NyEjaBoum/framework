@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 <<<<<<< Updated upstream
 package framework.servlet;  
 
@@ -306,6 +307,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+=======
+package framework.servlet;  
+
+import java.io.IOException;
+import java.io.PrintWriter;
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
@@ -325,6 +332,7 @@ import java.util.HashMap;
 import jakarta.servlet.http.Part;
 import jakarta.servlet.annotation.MultipartConfig;
 
+<<<<<<< HEAD
 @MultipartConfig(
     fileSizeThreshold = 1024 * 1024,      // 1 MB
     maxFileSize = 1024 * 1024 * 10,       // 10 MB
@@ -335,11 +343,19 @@ public class FrontServlet extends HttpServlet {
     RequestDispatcher defaultDispatcher;
     private Map<String, List<InfoUrl>> urlToInfoList;
     private Path uploadRoot; // Dossier uploads créé à l'init
+=======
+@MultipartConfig // <-- AJOUTE CETTE LIGNE
+public class FrontServlet extends HttpServlet {
+
+    RequestDispatcher defaultDispatcher;
+    private Map<String, List<InfoUrl>> urlToInfoList; // Ajouté
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
 
     @Override
     public void init() {
         System.out.println("=== INITIALISATION FRAMEWORK ===");
         defaultDispatcher = getServletContext().getNamedDispatcher("default");
+<<<<<<< HEAD
         
         // Créer le dossier uploads dans le webapp (ex: /opt/tomcat10/webapps/test/uploads)
         try {
@@ -356,11 +372,17 @@ public class FrontServlet extends HttpServlet {
             e.printStackTrace();
         }
         
+=======
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
         try {
             String classesPath = getServletContext().getRealPath("/WEB-INF/classes");
             Scanner scanner = new Scanner();
             scanner.scanControllers(new File(classesPath), "");
+<<<<<<< HEAD
             urlToInfoList = scanner.urlToInfoList;
+=======
+            urlToInfoList = scanner.urlToInfoList; // Correction : stocker la map dans l'attribut
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
             getServletContext().setAttribute("urlToInfoList", urlToInfoList);
 
             System.out.println("Framework initialisé. URLs: " + urlToInfoList.keySet());
@@ -394,6 +416,7 @@ public class FrontServlet extends HttpServlet {
                 Parameter[] params = method.getParameters();
                 Object[] invokedArgs = new Object[params.length];
 
+<<<<<<< HEAD
                 // Récupération des fichiers uploadés et sauvegarde sur disque
                 Map<String, byte[]> fileMap = new HashMap<>();
                 Map<String, String> savedPaths = new HashMap<>();
@@ -472,20 +495,45 @@ public class FrontServlet extends HttpServlet {
                 // rendre accessible pour le binding et pour la JSP
                 req.setAttribute("fileMap", fileMap);
                 req.setAttribute("uploadedPaths", savedPaths);
+=======
+                // Récupération des fichiers uploadés
+                Map<String, byte[]> fileMap = new HashMap<>();
+                if (req.getContentType() != null && req.getContentType().toLowerCase().startsWith("multipart/")) {
+                    for (Part part : req.getParts()) {
+                        if (part.getSubmittedFileName() != null && !part.getSubmittedFileName().isEmpty()) {
+                            byte[] bytes = part.getInputStream().readAllBytes();
+                            fileMap.put(part.getName(), bytes);
+                        }
+                    }
+                }
+                // rendre accessible pour le binding et pour la JSP
+                req.setAttribute("fileMap", fileMap);
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
 
                 for (int i = 0; i < params.length; i++) {
                     Parameter p = params[i];
                     Class<?> type = p.getType();
                     Object value = null;
 
+<<<<<<< HEAD
                     // Injection du Map des fichiers
                     if (Map.class.isAssignableFrom(type)) {
                         Object attr = req.getAttribute("fileMap");
                         if (attr != null && !((Map<?,?>)attr).isEmpty()) {
+=======
+                    // Injection du Map des fichiers : si un attribut "fileMap" est présent sur la requête, l'utiliser.
+                    if (Map.class.isAssignableFrom(type)) {
+                        Object attr = req.getAttribute("fileMap");
+                        if (attr != null) {
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
                             value = attr;
                         } else if (p.getName().toLowerCase().contains("file") || p.getName().toLowerCase().contains("fichier")) {
                             value = fileMap;
                         } else {
+<<<<<<< HEAD
+=======
+                            // Injection automatique de tous les paramètres de requête dans Map<String,Object>
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
                             Map<String, Object> paramMap = new HashMap<>();
                             Map<String, String[]> paramValues = req.getParameterMap();
                             for (Map.Entry<String, String[]> entry : paramValues.entrySet()) {
@@ -501,6 +549,10 @@ public class FrontServlet extends HttpServlet {
                             value = paramMap;
                         }
                     }
+<<<<<<< HEAD
+=======
+                    // 1. VariableChemin
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
                     else if (p.isAnnotationPresent(VariableChemin.class)) {
                         VariableChemin ann = p.getAnnotation(VariableChemin.class);
                         String key = ann.value().isEmpty() ? p.getName() : ann.value();
@@ -510,6 +562,10 @@ public class FrontServlet extends HttpServlet {
                             throw new IllegalArgumentException("Paramètre de chemin manquant: " + key + " (type " + type.getSimpleName() + ")");
                         }
                     }
+<<<<<<< HEAD
+=======
+                    // 2. ParametreRequete
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
                     else if (p.isAnnotationPresent(ParametreRequete.class)) {
                         ParametreRequete ann = p.getAnnotation(ParametreRequete.class);
                         String key = ann.value().isEmpty() ? p.getName() : ann.value();
@@ -519,9 +575,17 @@ public class FrontServlet extends HttpServlet {
                             throw new IllegalArgumentException("Paramètre de requête manquant: " + key + " (type " + type.getSimpleName() + ")");
                         }
                     }
+<<<<<<< HEAD
                     else if (isCustomClass(type)) {
                         value = bindObject(type, req.getParameterMap());
                     }
+=======
+                    // 4. Binding automatique d'objet complexe
+                    else if (isCustomClass(type)) {
+                        value = bindObject(type, req.getParameterMap());
+                    }
+                    // 3. Aucun annotation : priorité chemin > requête
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
                     else {
                         String key = p.getName();
                         if (pathParams.containsKey(key)) {
@@ -557,6 +621,10 @@ public class FrontServlet extends HttpServlet {
         }
     }
 
+<<<<<<< HEAD
+=======
+    // Détection classe personnalisée (hors String, Integer, Map, List, etc.)
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
     private boolean isCustomClass(Class<?> type) {
         return !type.isPrimitive()
             && !type.getName().startsWith("java.")
@@ -565,6 +633,10 @@ public class FrontServlet extends HttpServlet {
             && !List.class.isAssignableFrom(type);
     }
 
+<<<<<<< HEAD
+=======
+    // Binding automatique d'objet complexe (récursif, gère listes et objets imbriqués)
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
     private Object bindObject(Class<?> clazz, Map<String, String[]> paramMap) {
         try {
             Object instance = clazz.getDeclaredConstructor().newInstance();
@@ -573,6 +645,10 @@ public class FrontServlet extends HttpServlet {
                 String prefix = clazz.getSimpleName() + "." + field.getName();
                 Class<?> fieldType = field.getType();
 
+<<<<<<< HEAD
+=======
+                // Gérer les listes
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
                 if (List.class.isAssignableFrom(fieldType)) {
                     String[] vals = paramMap.get(prefix);
                     if (vals != null) {
@@ -581,10 +657,18 @@ public class FrontServlet extends HttpServlet {
                         field.set(instance, list);
                     }
                 }
+<<<<<<< HEAD
+=======
+                // Gérer les objets imbriqués
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
                 else if (isCustomClass(fieldType)) {
                     Object subObj = bindObject(fieldType, paramMap);
                     field.set(instance, subObj);
                 }
+<<<<<<< HEAD
+=======
+                // Attribut simple
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
                 else {
                     String[] vals = paramMap.get(prefix);
                     if (vals != null && vals.length > 0) {
@@ -599,6 +683,10 @@ public class FrontServlet extends HttpServlet {
         }
     }
 
+<<<<<<< HEAD
+=======
+    // Traiter le résultat retourné par la méthode
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
     private void handleResult(Object result, String path, HttpServletRequest req, HttpServletResponse res) throws IOException, ServletException {
         if (result == null) {
             res.setContentType("text/plain; charset=UTF-8");
@@ -617,6 +705,10 @@ public class FrontServlet extends HttpServlet {
             return;
         }
 
+<<<<<<< HEAD
+=======
+        // Ajout : gestion JSON
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
         Method calledMethod = (Method) req.getAttribute("calledMethod");
         boolean isJson = false;
         if (calledMethod != null && calledMethod.isAnnotationPresent(framework.annotation.Json.class)) {
@@ -630,6 +722,10 @@ public class FrontServlet extends HttpServlet {
             return;
         }
 
+<<<<<<< HEAD
+=======
+        // Autres types (int, etc.)
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
         res.setContentType("text/plain; charset=UTF-8");
         res.getWriter().println("Résultat (" + result.getClass().getSimpleName() + "): " + result);
     }
@@ -640,9 +736,17 @@ public class FrontServlet extends HttpServlet {
         if (target == int.class || target == Integer.class) return Integer.parseInt(s);
         if (target == long.class || target == Long.class) return Long.parseLong(s);
         if (target == boolean.class || target == Boolean.class) return Boolean.parseBoolean(s);
+<<<<<<< HEAD
         return s;
     }
 
+=======
+        // ajouter selon besoin
+        return s;
+    }
+
+    // Ajoute une méthode utilitaire pour formatter la réponse JSON
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
     private String toJsonResponse(Object result) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\n");
@@ -675,6 +779,10 @@ public class FrontServlet extends HttpServlet {
         if (obj instanceof String || obj instanceof Number || obj instanceof Boolean) {
             return "\"" + obj.toString() + "\"";
         }
+<<<<<<< HEAD
+=======
+        // Simple POJO to JSON (fields only, no nested objects)
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
         StringBuilder sb = new StringBuilder();
         sb.append("{");
         java.lang.reflect.Field[] fields = obj.getClass().getDeclaredFields();
@@ -694,5 +802,8 @@ public class FrontServlet extends HttpServlet {
         sb.append("}");
         return sb.toString();
     }
+<<<<<<< HEAD
 >>>>>>> Stashed changes
+=======
+>>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
 }
