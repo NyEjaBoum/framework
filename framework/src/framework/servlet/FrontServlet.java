@@ -1,303 +1,3 @@
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-package framework.servlet;  
-
-import java.io.IOException;
-import java.io.PrintWriter;
-import jakarta.servlet.RequestDispatcher;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServlet;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import java.lang.reflect.Method;
-import java.io.File;
-import java.util.Map;
-import java.lang.reflect.Parameter;
-import framework.annotation.ParametreRequete;
-import framework.annotation.VariableChemin;
-import framework.view.ModelView;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
-import java.util.HashMap;
-
-public class FrontServlet extends HttpServlet {
-
-    RequestDispatcher defaultDispatcher;
-    private Map<String, List<InfoUrl>> urlToInfoList; // Ajouté
-
-    @Override
-    public void init() {
-        System.out.println("=== INITIALISATION FRAMEWORK ===");
-        defaultDispatcher = getServletContext().getNamedDispatcher("default");
-        try {
-            String classesPath = getServletContext().getRealPath("/WEB-INF/classes");
-            Scanner scanner = new Scanner();
-            scanner.scanControllers(new File(classesPath), "");
-            urlToInfoList = scanner.urlToInfoList; // Correction : stocker la map dans l'attribut
-            getServletContext().setAttribute("urlToInfoList", urlToInfoList);
-
-            System.out.println("Framework initialisé. URLs: " + urlToInfoList.keySet());
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    protected void service(HttpServletRequest req, HttpServletResponse res) throws ServletException, IOException {
-        String path = req.getRequestURI().substring(req.getContextPath().length());
-        String httpMethod = req.getMethod();
-
-        Map<String, List<InfoUrl>> urlToInfoList = (Map<String, List<InfoUrl>>) getServletContext().getAttribute("urlToInfoList");
-        if (urlToInfoList == null) urlToInfoList = this.urlToInfoList;
-
-        try {
-            RouteResult route = Router.findRoute(path, httpMethod, urlToInfoList);
-            Method method = null;
-            Map<String,String> pathParams = Collections.emptyMap();
-            if (route != null) {
-                method = route.method;
-                pathParams = route.pathParams != null ? route.pathParams : Collections.emptyMap();
-            }
-
-            if (method != null) {
-                Class<?> controllerClass = method.getDeclaringClass();
-                Object controllerInstance = controllerClass.getDeclaredConstructor().newInstance();
-
-                Parameter[] params = method.getParameters();
-                Object[] invokedArgs = new Object[params.length];
-
-                for (int i = 0; i < params.length; i++) {
-                    Parameter p = params[i];
-                    Class<?> type = p.getType();
-                    Object value = null;
-
-                    // Injection automatique de tous les paramètres de requête dans Map<String,Object>
-                    if (Map.class.isAssignableFrom(type)) {
-                        Map<String, Object> paramMap = new HashMap<>();
-                        Map<String, String[]> paramValues = req.getParameterMap();
-                        for (Map.Entry<String, String[]> entry : paramValues.entrySet()) {
-                            String key = entry.getKey();
-                            String[] vals = entry.getValue();
-                            if (vals == null) continue;
-                            if (vals.length == 1) {
-                                paramMap.put(key, vals[0]);
-                            } else {
-                                paramMap.put(key, vals);
-                            }
-                        }
-                        value = paramMap;
-                    }
-                    // 1. VariableChemin
-                    else if (p.isAnnotationPresent(VariableChemin.class)) {
-                        VariableChemin ann = p.getAnnotation(VariableChemin.class);
-                        String key = ann.value().isEmpty() ? p.getName() : ann.value();
-                        String s = pathParams.get(key);
-                        if (s != null) value = convertString(s, type);
-                        if (value == null && ann.required()) {
-                            throw new IllegalArgumentException("Paramètre de chemin manquant: " + key + " (type " + type.getSimpleName() + ")");
-                        }
-                    }
-                    // 2. ParametreRequete
-                    else if (p.isAnnotationPresent(ParametreRequete.class)) {
-                        ParametreRequete ann = p.getAnnotation(ParametreRequete.class);
-                        String key = ann.value().isEmpty() ? p.getName() : ann.value();
-                        String s = req.getParameter(key);
-                        if (s != null) value = convertString(s, type);
-                        if (value == null && ann.required()) {
-                            throw new IllegalArgumentException("Paramètre de requête manquant: " + key + " (type " + type.getSimpleName() + ")");
-                        }
-                    }
-                    // 4. Binding automatique d'objet complexe
-                    else if (isCustomClass(type)) {
-                        value = bindObject(type, req.getParameterMap());
-                    }
-                    // 3. Aucun annotation : priorité chemin > requête
-                    else {
-                        String key = p.getName();
-                        if (pathParams.containsKey(key)) {
-                            String s = pathParams.get(key);
-                            if (s != null) value = convertString(s, type);
-                        }
-                        if (value == null) {
-                            String s = req.getParameter(key);
-                            if (s != null) value = convertString(s, type);
-                        }
-                        if (value == null && type.isPrimitive()) {
-                            throw new IllegalArgumentException("Paramètre manquant: " + key + " (type " + type.getSimpleName() + ")");
-                        }
-                    }
-                    invokedArgs[i] = value;
-                }
-
-                req.setAttribute("calledMethod", method);
-
-                Object result = method.invoke(controllerInstance, invokedArgs);
-                handleResult(result, path, req, res);
-            } else if (route != null && route.allowedMethods != null) {
-                res.setStatus(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
-                res.setHeader("Allow", String.join(", ", route.allowedMethods));
-                ViewHandler.show405(path, route.allowedMethods, req, res);
-                return;
-            } else {
-                ViewHandler.handleNotFound(path, req, res);
-            }
-
-        } catch (Exception e) {
-            ViewHandler.handleException(e, path, req, res);
-        }
-    }
-
-    // Détection classe personnalisée (hors String, Integer, Map, List, etc.)
-    private boolean isCustomClass(Class<?> type) {
-        return !type.isPrimitive()
-            && !type.getName().startsWith("java.")
-            && !type.isEnum()
-            && !Map.class.isAssignableFrom(type)
-            && !List.class.isAssignableFrom(type);
-    }
-
-    // Binding automatique d'objet complexe (récursif, gère listes et objets imbriqués)
-    private Object bindObject(Class<?> clazz, Map<String, String[]> paramMap) {
-        try {
-            Object instance = clazz.getDeclaredConstructor().newInstance();
-            for (java.lang.reflect.Field field : clazz.getDeclaredFields()) {
-                field.setAccessible(true);
-                String prefix = clazz.getSimpleName() + "." + field.getName();
-                Class<?> fieldType = field.getType();
-
-                // Gérer les listes
-                if (List.class.isAssignableFrom(fieldType)) {
-                    String[] vals = paramMap.get(prefix);
-                    if (vals != null) {
-                        List<String> list = new java.util.ArrayList<>();
-                        for (String v : vals) list.add(v);
-                        field.set(instance, list);
-                    }
-                }
-                // Gérer les objets imbriqués
-                else if (isCustomClass(fieldType)) {
-                    Object subObj = bindObject(fieldType, paramMap);
-                    field.set(instance, subObj);
-                }
-                // Attribut simple
-                else {
-                    String[] vals = paramMap.get(prefix);
-                    if (vals != null && vals.length > 0) {
-                        Object converted = convertString(vals[0], fieldType);
-                        field.set(instance, converted);
-                    }
-                }
-            }
-            return instance;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    // Traiter le résultat retourné par la méthode
-    private void handleResult(Object result, String path, HttpServletRequest req, HttpServletResponse res) throws IOException, ServletException {
-        if (result == null) {
-            res.setContentType("text/plain; charset=UTF-8");
-            res.getWriter().println("Méthode exécutée: " + path);
-            return;
-        }
-
-        if (result instanceof String) {
-            res.setContentType("text/plain; charset=UTF-8");
-            res.getWriter().println("Résultat: " + result);
-            return;
-        }
-
-        if (result instanceof ModelView) {
-            ViewHandler.handle((ModelView) result, req, res);
-            return;
-        }
-
-        // Ajout : gestion JSON
-        Method calledMethod = (Method) req.getAttribute("calledMethod");
-        boolean isJson = false;
-        if (calledMethod != null && calledMethod.isAnnotationPresent(framework.annotation.Json.class)) {
-            isJson = true;
-        }
-
-        if (isJson) {
-            res.setContentType("application/json; charset=UTF-8");
-            String json = toJsonResponse(result);
-            res.getWriter().write(json);
-            return;
-        }
-
-        // Autres types (int, etc.)
-        res.setContentType("text/plain; charset=UTF-8");
-        res.getWriter().println("Résultat (" + result.getClass().getSimpleName() + "): " + result);
-    }
-
-    private Object convertString(String s, Class<?> target) {
-        if (s == null) return null;
-        if (target == String.class) return s;
-        if (target == int.class || target == Integer.class) return Integer.parseInt(s);
-        if (target == long.class || target == Long.class) return Long.parseLong(s);
-        if (target == boolean.class || target == Boolean.class) return Boolean.parseBoolean(s);
-        // ajouter selon besoin
-        return s;
-    }
-
-    // Ajoute une méthode utilitaire pour formatter la réponse JSON
-    private String toJsonResponse(Object result) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\n");
-        sb.append("  \"statut\": \"success\",\n");
-        sb.append("  \"code\": 200,\n");
-        if (result instanceof java.util.List) {
-            java.util.List<?> list = (java.util.List<?>) result;
-            sb.append("  \"count\": ").append(list.size()).append(",\n");
-            sb.append("  \"data\": ").append(listToJson(list)).append("\n");
-        } else {
-            sb.append("  \"data\": ").append(objectToJson(result)).append("\n");
-        }
-        sb.append("}");
-        return sb.toString();
-    }
-
-    private String listToJson(java.util.List<?> list) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("[");
-        for (int i = 0; i < list.size(); i++) {
-            sb.append(objectToJson(list.get(i)));
-            if (i < list.size() - 1) sb.append(", ");
-        }
-        sb.append("]");
-        return sb.toString();
-    }
-
-    private String objectToJson(Object obj) {
-        if (obj == null) return "null";
-        if (obj instanceof String || obj instanceof Number || obj instanceof Boolean) {
-            return "\"" + obj.toString() + "\"";
-        }
-        // Simple POJO to JSON (fields only, no nested objects)
-        StringBuilder sb = new StringBuilder();
-        sb.append("{");
-        java.lang.reflect.Field[] fields = obj.getClass().getDeclaredFields();
-        for (int i = 0; i < fields.length; i++) {
-            fields[i].setAccessible(true);
-            try {
-                sb.append("\"").append(fields[i].getName()).append("\": ");
-                Object val = fields[i].get(obj);
-                if (val == null) sb.append("null");
-                else if (val instanceof String) sb.append("\"").append(val).append("\"");
-                else sb.append(val.toString());
-            } catch (Exception e) {
-                sb.append("\"error\"");
-            }
-            if (i < fields.length - 1) sb.append(", ");
-        }
-        sb.append("}");
-        return sb.toString();
-    }
-=======
 package framework.servlet;  
 
 import java.io.IOException;
@@ -307,20 +7,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-=======
-package framework.servlet;  
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.PrintWriter;
-<<<<<<< Updated upstream
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
->>>>>>> Stashed changes
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
@@ -340,44 +26,21 @@ import java.util.HashMap;
 import jakarta.servlet.http.Part;
 import jakarta.servlet.annotation.MultipartConfig;
 
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
->>>>>>> Stashed changes
 @MultipartConfig(
     fileSizeThreshold = 1024 * 1024,      // 1 MB
     maxFileSize = 1024 * 1024 * 10,       // 10 MB
     maxRequestSize = 1024 * 1024 * 50     // 50 MB
 )
-<<<<<<< Updated upstream
 public class FrontServlet extends HttpServlet {
 
     RequestDispatcher defaultDispatcher;
     private Map<String, List<InfoUrl>> urlToInfoList;
     private Path uploadRoot; // Dossier uploads créé à l'init
-=======
-@MultipartConfig // <-- AJOUTE CETTE LIGNE
-public class FrontServlet extends HttpServlet {
-
-    RequestDispatcher defaultDispatcher;
-    private Map<String, List<InfoUrl>> urlToInfoList; // Ajouté
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
-public class FrontServlet extends HttpServlet {
-
-    RequestDispatcher defaultDispatcher;
-    private Map<String, List<InfoUrl>> urlToInfoList;
-    private Path uploadRoot; // Dossier uploads créé à l'init
->>>>>>> Stashed changes
 
     @Override
     public void init() {
         System.out.println("=== INITIALISATION FRAMEWORK ===");
         defaultDispatcher = getServletContext().getNamedDispatcher("default");
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
->>>>>>> Stashed changes
         
         // Créer le dossier uploads dans le webapp (ex: /opt/tomcat10/webapps/test/uploads)
         try {
@@ -394,24 +57,11 @@ public class FrontServlet extends HttpServlet {
             e.printStackTrace();
         }
         
-<<<<<<< Updated upstream
-=======
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
         try {
             String classesPath = getServletContext().getRealPath("/WEB-INF/classes");
             Scanner scanner = new Scanner();
             scanner.scanControllers(new File(classesPath), "");
-<<<<<<< Updated upstream
-<<<<<<< HEAD
             urlToInfoList = scanner.urlToInfoList;
-=======
-            urlToInfoList = scanner.urlToInfoList; // Correction : stocker la map dans l'attribut
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
-            urlToInfoList = scanner.urlToInfoList;
->>>>>>> Stashed changes
             getServletContext().setAttribute("urlToInfoList", urlToInfoList);
 
             System.out.println("Framework initialisé. URLs: " + urlToInfoList.keySet());
@@ -445,8 +95,6 @@ public class FrontServlet extends HttpServlet {
                 Parameter[] params = method.getParameters();
                 Object[] invokedArgs = new Object[params.length];
 
-<<<<<<< Updated upstream
-<<<<<<< HEAD
                 // Récupération des fichiers uploadés et sauvegarde sur disque
                 Map<String, byte[]> fileMap = new HashMap<>();
                 Map<String, String> savedPaths = new HashMap<>();
@@ -525,127 +173,20 @@ public class FrontServlet extends HttpServlet {
                 // rendre accessible pour le binding et pour la JSP
                 req.setAttribute("fileMap", fileMap);
                 req.setAttribute("uploadedPaths", savedPaths);
-=======
-                // Récupération des fichiers uploadés
-=======
-                // Récupération des fichiers uploadés et sauvegarde sur disque
->>>>>>> Stashed changes
-                Map<String, byte[]> fileMap = new HashMap<>();
-                Map<String, String> savedPaths = new HashMap<>();
-
-                // Utiliser le uploadRoot créé à l'init (dans le webapp)
-                // Si null, tenter de le recréer
-                if (uploadRoot == null) {
-                    String webappPath = req.getServletContext().getRealPath("/");
-                    if (webappPath != null) {
-                        uploadRoot = Paths.get(webappPath, "uploads");
-                        try {
-                            Files.createDirectories(uploadRoot);
-                        } catch (Exception ex) {
-                            System.err.println("[FrontServlet] ERREUR création uploadRoot: " + ex.getMessage());
-                            uploadRoot = null;
-                        }
-                    }
-                }
-                
-                System.out.println("[FrontServlet] ========== UPLOAD DEBUG ==========");
-                System.out.println("[FrontServlet] uploadRoot = " + (uploadRoot != null ? uploadRoot.toAbsolutePath() : "null"));
-                System.out.println("[FrontServlet] Content-Type = " + req.getContentType());
-                if (uploadRoot != null) {
-                    System.out.println("[FrontServlet] uploadRoot exists = " + Files.exists(uploadRoot));
-                    System.out.println("[FrontServlet] uploadRoot writable = " + Files.isWritable(uploadRoot));
-                }
-
-                if (req.getContentType() != null && req.getContentType().toLowerCase().startsWith("multipart/")) {
-                    System.out.println("[FrontServlet] Requête multipart détectée, traitement des parts...");
-                    try {
-                        for (Part part : req.getParts()) {
-                            String submitted = part.getSubmittedFileName();
-                            System.out.println("[FrontServlet] Part: name=" + part.getName() + ", submittedFileName=" + submitted + ", size=" + part.getSize());
-                            
-                            if (submitted != null && !submitted.isEmpty()) {
-                                // safe filename (basename)
-                                String safeName = Paths.get(submitted).getFileName().toString();
-                                try {
-                                    if (uploadRoot != null && Files.isWritable(uploadRoot)) {
-                                        String unique = System.currentTimeMillis() + "_" + safeName;
-                                        Path target = uploadRoot.resolve(unique);
-                                        System.out.println("[FrontServlet] Saving file to: " + target.toAbsolutePath());
-                                        
-                                        try (InputStream in = part.getInputStream()) {
-                                            long copied = Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
-                                            System.out.println("[FrontServlet] File saved: " + target + " (" + copied + " bytes)");
-                                        }
-                                        
-                                        byte[] bytes = Files.readAllBytes(target);
-                                        fileMap.put(part.getName(), bytes);
-                                        savedPaths.put(part.getName(), target.toString());
-                                        System.out.println("[FrontServlet] SUCCESS: File saved to disk: " + target);
-                                    } else {
-                                        System.out.println("[FrontServlet] uploadRoot is null or not writable, reading file into memory only");
-                                        byte[] bytes = part.getInputStream().readAllBytes();
-                                        fileMap.put(part.getName(), bytes);
-                                    }
-                                } catch (Exception e) {
-                                    System.err.println("[FrontServlet] ERREUR sauvegarde fichier: " + e.getMessage());
-                                    e.printStackTrace();
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        System.err.println("[FrontServlet] ERREUR getParts(): " + e.getMessage());
-                        e.printStackTrace();
-                    }
-                } else {
-                    System.out.println("[FrontServlet] Pas de contenu multipart (contentType=" + req.getContentType() + ")");
-                }
-                
-                System.out.println("[FrontServlet] fileMap size = " + fileMap.size());
-                System.out.println("[FrontServlet] savedPaths = " + savedPaths);
-                System.out.println("[FrontServlet] ========== END UPLOAD DEBUG ==========");
-
-                // rendre accessible pour le binding et pour la JSP
-                req.setAttribute("fileMap", fileMap);
-<<<<<<< Updated upstream
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
-                req.setAttribute("uploadedPaths", savedPaths);
->>>>>>> Stashed changes
 
                 for (int i = 0; i < params.length; i++) {
                     Parameter p = params[i];
                     Class<?> type = p.getType();
                     Object value = null;
 
-<<<<<<< Updated upstream
-<<<<<<< HEAD
                     // Injection du Map des fichiers
                     if (Map.class.isAssignableFrom(type)) {
                         Object attr = req.getAttribute("fileMap");
                         if (attr != null && !((Map<?,?>)attr).isEmpty()) {
-=======
-                    // Injection du Map des fichiers : si un attribut "fileMap" est présent sur la requête, l'utiliser.
-                    if (Map.class.isAssignableFrom(type)) {
-                        Object attr = req.getAttribute("fileMap");
-                        if (attr != null) {
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
-                    // Injection du Map des fichiers
-                    if (Map.class.isAssignableFrom(type)) {
-                        Object attr = req.getAttribute("fileMap");
-                        if (attr != null && !((Map<?,?>)attr).isEmpty()) {
->>>>>>> Stashed changes
                             value = attr;
                         } else if (p.getName().toLowerCase().contains("file") || p.getName().toLowerCase().contains("fichier")) {
                             value = fileMap;
                         } else {
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
-                            // Injection automatique de tous les paramètres de requête dans Map<String,Object>
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
                             Map<String, Object> paramMap = new HashMap<>();
                             Map<String, String[]> paramValues = req.getParameterMap();
                             for (Map.Entry<String, String[]> entry : paramValues.entrySet()) {
@@ -661,13 +202,6 @@ public class FrontServlet extends HttpServlet {
                             value = paramMap;
                         }
                     }
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
-                    // 1. VariableChemin
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
                     else if (p.isAnnotationPresent(VariableChemin.class)) {
                         VariableChemin ann = p.getAnnotation(VariableChemin.class);
                         String key = ann.value().isEmpty() ? p.getName() : ann.value();
@@ -677,13 +211,6 @@ public class FrontServlet extends HttpServlet {
                             throw new IllegalArgumentException("Paramètre de chemin manquant: " + key + " (type " + type.getSimpleName() + ")");
                         }
                     }
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
-                    // 2. ParametreRequete
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
                     else if (p.isAnnotationPresent(ParametreRequete.class)) {
                         ParametreRequete ann = p.getAnnotation(ParametreRequete.class);
                         String key = ann.value().isEmpty() ? p.getName() : ann.value();
@@ -693,23 +220,9 @@ public class FrontServlet extends HttpServlet {
                             throw new IllegalArgumentException("Paramètre de requête manquant: " + key + " (type " + type.getSimpleName() + ")");
                         }
                     }
-<<<<<<< Updated upstream
-<<<<<<< HEAD
                     else if (isCustomClass(type)) {
                         value = bindObject(type, req.getParameterMap());
                     }
-=======
-                    // 4. Binding automatique d'objet complexe
-                    else if (isCustomClass(type)) {
-                        value = bindObject(type, req.getParameterMap());
-                    }
-                    // 3. Aucun annotation : priorité chemin > requête
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
-                    else if (isCustomClass(type)) {
-                        value = bindObject(type, req.getParameterMap());
-                    }
->>>>>>> Stashed changes
                     else {
                         String key = p.getName();
                         if (pathParams.containsKey(key)) {
@@ -745,13 +258,6 @@ public class FrontServlet extends HttpServlet {
         }
     }
 
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
-    // Détection classe personnalisée (hors String, Integer, Map, List, etc.)
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
     private boolean isCustomClass(Class<?> type) {
         return !type.isPrimitive()
             && !type.getName().startsWith("java.")
@@ -760,13 +266,6 @@ public class FrontServlet extends HttpServlet {
             && !List.class.isAssignableFrom(type);
     }
 
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
-    // Binding automatique d'objet complexe (récursif, gère listes et objets imbriqués)
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
     private Object bindObject(Class<?> clazz, Map<String, String[]> paramMap) {
         try {
             Object instance = clazz.getDeclaredConstructor().newInstance();
@@ -775,13 +274,6 @@ public class FrontServlet extends HttpServlet {
                 String prefix = clazz.getSimpleName() + "." + field.getName();
                 Class<?> fieldType = field.getType();
 
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
-                // Gérer les listes
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
                 if (List.class.isAssignableFrom(fieldType)) {
                     String[] vals = paramMap.get(prefix);
                     if (vals != null) {
@@ -790,24 +282,10 @@ public class FrontServlet extends HttpServlet {
                         field.set(instance, list);
                     }
                 }
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
-                // Gérer les objets imbriqués
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
                 else if (isCustomClass(fieldType)) {
                     Object subObj = bindObject(fieldType, paramMap);
                     field.set(instance, subObj);
                 }
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
-                // Attribut simple
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
                 else {
                     String[] vals = paramMap.get(prefix);
                     if (vals != null && vals.length > 0) {
@@ -822,13 +300,6 @@ public class FrontServlet extends HttpServlet {
         }
     }
 
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
-    // Traiter le résultat retourné par la méthode
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
     private void handleResult(Object result, String path, HttpServletRequest req, HttpServletResponse res) throws IOException, ServletException {
         if (result == null) {
             res.setContentType("text/plain; charset=UTF-8");
@@ -847,13 +318,6 @@ public class FrontServlet extends HttpServlet {
             return;
         }
 
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
-        // Ajout : gestion JSON
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
         Method calledMethod = (Method) req.getAttribute("calledMethod");
         boolean isJson = false;
         if (calledMethod != null && calledMethod.isAnnotationPresent(framework.annotation.Json.class)) {
@@ -867,13 +331,6 @@ public class FrontServlet extends HttpServlet {
             return;
         }
 
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
-        // Autres types (int, etc.)
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
         res.setContentType("text/plain; charset=UTF-8");
         res.getWriter().println("Résultat (" + result.getClass().getSimpleName() + "): " + result);
     }
@@ -884,23 +341,9 @@ public class FrontServlet extends HttpServlet {
         if (target == int.class || target == Integer.class) return Integer.parseInt(s);
         if (target == long.class || target == Long.class) return Long.parseLong(s);
         if (target == boolean.class || target == Boolean.class) return Boolean.parseBoolean(s);
-<<<<<<< Updated upstream
-<<<<<<< HEAD
         return s;
     }
 
-=======
-        // ajouter selon besoin
-        return s;
-    }
-
-    // Ajoute une méthode utilitaire pour formatter la réponse JSON
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
-        return s;
-    }
-
->>>>>>> Stashed changes
     private String toJsonResponse(Object result) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\n");
@@ -933,13 +376,6 @@ public class FrontServlet extends HttpServlet {
         if (obj instanceof String || obj instanceof Number || obj instanceof Boolean) {
             return "\"" + obj.toString() + "\"";
         }
-<<<<<<< Updated upstream
-<<<<<<< HEAD
-=======
-        // Simple POJO to JSON (fields only, no nested objects)
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
-=======
->>>>>>> Stashed changes
         StringBuilder sb = new StringBuilder();
         sb.append("{");
         java.lang.reflect.Field[] fields = obj.getClass().getDeclaredFields();
@@ -959,8 +395,4 @@ public class FrontServlet extends HttpServlet {
         sb.append("}");
         return sb.toString();
     }
-<<<<<<< HEAD
->>>>>>> Stashed changes
-=======
->>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
 }
