@@ -311,8 +311,16 @@ import java.nio.file.StandardCopyOption;
 package framework.servlet;  
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintWriter;
+<<<<<<< Updated upstream
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+>>>>>>> Stashed changes
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
@@ -332,12 +340,16 @@ import java.util.HashMap;
 import jakarta.servlet.http.Part;
 import jakarta.servlet.annotation.MultipartConfig;
 
+<<<<<<< Updated upstream
 <<<<<<< HEAD
+=======
+>>>>>>> Stashed changes
 @MultipartConfig(
     fileSizeThreshold = 1024 * 1024,      // 1 MB
     maxFileSize = 1024 * 1024 * 10,       // 10 MB
     maxRequestSize = 1024 * 1024 * 50     // 50 MB
 )
+<<<<<<< Updated upstream
 public class FrontServlet extends HttpServlet {
 
     RequestDispatcher defaultDispatcher;
@@ -350,12 +362,22 @@ public class FrontServlet extends HttpServlet {
     RequestDispatcher defaultDispatcher;
     private Map<String, List<InfoUrl>> urlToInfoList; // Ajouté
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+public class FrontServlet extends HttpServlet {
+
+    RequestDispatcher defaultDispatcher;
+    private Map<String, List<InfoUrl>> urlToInfoList;
+    private Path uploadRoot; // Dossier uploads créé à l'init
+>>>>>>> Stashed changes
 
     @Override
     public void init() {
         System.out.println("=== INITIALISATION FRAMEWORK ===");
         defaultDispatcher = getServletContext().getNamedDispatcher("default");
+<<<<<<< Updated upstream
 <<<<<<< HEAD
+=======
+>>>>>>> Stashed changes
         
         // Créer le dossier uploads dans le webapp (ex: /opt/tomcat10/webapps/test/uploads)
         try {
@@ -372,17 +394,24 @@ public class FrontServlet extends HttpServlet {
             e.printStackTrace();
         }
         
+<<<<<<< Updated upstream
 =======
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
         try {
             String classesPath = getServletContext().getRealPath("/WEB-INF/classes");
             Scanner scanner = new Scanner();
             scanner.scanControllers(new File(classesPath), "");
+<<<<<<< Updated upstream
 <<<<<<< HEAD
             urlToInfoList = scanner.urlToInfoList;
 =======
             urlToInfoList = scanner.urlToInfoList; // Correction : stocker la map dans l'attribut
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+            urlToInfoList = scanner.urlToInfoList;
+>>>>>>> Stashed changes
             getServletContext().setAttribute("urlToInfoList", urlToInfoList);
 
             System.out.println("Framework initialisé. URLs: " + urlToInfoList.keySet());
@@ -416,6 +445,7 @@ public class FrontServlet extends HttpServlet {
                 Parameter[] params = method.getParameters();
                 Object[] invokedArgs = new Object[params.length];
 
+<<<<<<< Updated upstream
 <<<<<<< HEAD
                 // Récupération des fichiers uploadés et sauvegarde sur disque
                 Map<String, byte[]> fileMap = new HashMap<>();
@@ -497,24 +527,97 @@ public class FrontServlet extends HttpServlet {
                 req.setAttribute("uploadedPaths", savedPaths);
 =======
                 // Récupération des fichiers uploadés
+=======
+                // Récupération des fichiers uploadés et sauvegarde sur disque
+>>>>>>> Stashed changes
                 Map<String, byte[]> fileMap = new HashMap<>();
-                if (req.getContentType() != null && req.getContentType().toLowerCase().startsWith("multipart/")) {
-                    for (Part part : req.getParts()) {
-                        if (part.getSubmittedFileName() != null && !part.getSubmittedFileName().isEmpty()) {
-                            byte[] bytes = part.getInputStream().readAllBytes();
-                            fileMap.put(part.getName(), bytes);
+                Map<String, String> savedPaths = new HashMap<>();
+
+                // Utiliser le uploadRoot créé à l'init (dans le webapp)
+                // Si null, tenter de le recréer
+                if (uploadRoot == null) {
+                    String webappPath = req.getServletContext().getRealPath("/");
+                    if (webappPath != null) {
+                        uploadRoot = Paths.get(webappPath, "uploads");
+                        try {
+                            Files.createDirectories(uploadRoot);
+                        } catch (Exception ex) {
+                            System.err.println("[FrontServlet] ERREUR création uploadRoot: " + ex.getMessage());
+                            uploadRoot = null;
                         }
                     }
                 }
+                
+                System.out.println("[FrontServlet] ========== UPLOAD DEBUG ==========");
+                System.out.println("[FrontServlet] uploadRoot = " + (uploadRoot != null ? uploadRoot.toAbsolutePath() : "null"));
+                System.out.println("[FrontServlet] Content-Type = " + req.getContentType());
+                if (uploadRoot != null) {
+                    System.out.println("[FrontServlet] uploadRoot exists = " + Files.exists(uploadRoot));
+                    System.out.println("[FrontServlet] uploadRoot writable = " + Files.isWritable(uploadRoot));
+                }
+
+                if (req.getContentType() != null && req.getContentType().toLowerCase().startsWith("multipart/")) {
+                    System.out.println("[FrontServlet] Requête multipart détectée, traitement des parts...");
+                    try {
+                        for (Part part : req.getParts()) {
+                            String submitted = part.getSubmittedFileName();
+                            System.out.println("[FrontServlet] Part: name=" + part.getName() + ", submittedFileName=" + submitted + ", size=" + part.getSize());
+                            
+                            if (submitted != null && !submitted.isEmpty()) {
+                                // safe filename (basename)
+                                String safeName = Paths.get(submitted).getFileName().toString();
+                                try {
+                                    if (uploadRoot != null && Files.isWritable(uploadRoot)) {
+                                        String unique = System.currentTimeMillis() + "_" + safeName;
+                                        Path target = uploadRoot.resolve(unique);
+                                        System.out.println("[FrontServlet] Saving file to: " + target.toAbsolutePath());
+                                        
+                                        try (InputStream in = part.getInputStream()) {
+                                            long copied = Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                                            System.out.println("[FrontServlet] File saved: " + target + " (" + copied + " bytes)");
+                                        }
+                                        
+                                        byte[] bytes = Files.readAllBytes(target);
+                                        fileMap.put(part.getName(), bytes);
+                                        savedPaths.put(part.getName(), target.toString());
+                                        System.out.println("[FrontServlet] SUCCESS: File saved to disk: " + target);
+                                    } else {
+                                        System.out.println("[FrontServlet] uploadRoot is null or not writable, reading file into memory only");
+                                        byte[] bytes = part.getInputStream().readAllBytes();
+                                        fileMap.put(part.getName(), bytes);
+                                    }
+                                } catch (Exception e) {
+                                    System.err.println("[FrontServlet] ERREUR sauvegarde fichier: " + e.getMessage());
+                                    e.printStackTrace();
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        System.err.println("[FrontServlet] ERREUR getParts(): " + e.getMessage());
+                        e.printStackTrace();
+                    }
+                } else {
+                    System.out.println("[FrontServlet] Pas de contenu multipart (contentType=" + req.getContentType() + ")");
+                }
+                
+                System.out.println("[FrontServlet] fileMap size = " + fileMap.size());
+                System.out.println("[FrontServlet] savedPaths = " + savedPaths);
+                System.out.println("[FrontServlet] ========== END UPLOAD DEBUG ==========");
+
                 // rendre accessible pour le binding et pour la JSP
                 req.setAttribute("fileMap", fileMap);
+<<<<<<< Updated upstream
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+                req.setAttribute("uploadedPaths", savedPaths);
+>>>>>>> Stashed changes
 
                 for (int i = 0; i < params.length; i++) {
                     Parameter p = params[i];
                     Class<?> type = p.getType();
                     Object value = null;
 
+<<<<<<< Updated upstream
 <<<<<<< HEAD
                     // Injection du Map des fichiers
                     if (Map.class.isAssignableFrom(type)) {
@@ -526,14 +629,23 @@ public class FrontServlet extends HttpServlet {
                         Object attr = req.getAttribute("fileMap");
                         if (attr != null) {
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+                    // Injection du Map des fichiers
+                    if (Map.class.isAssignableFrom(type)) {
+                        Object attr = req.getAttribute("fileMap");
+                        if (attr != null && !((Map<?,?>)attr).isEmpty()) {
+>>>>>>> Stashed changes
                             value = attr;
                         } else if (p.getName().toLowerCase().contains("file") || p.getName().toLowerCase().contains("fichier")) {
                             value = fileMap;
                         } else {
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 =======
                             // Injection automatique de tous les paramètres de requête dans Map<String,Object>
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
                             Map<String, Object> paramMap = new HashMap<>();
                             Map<String, String[]> paramValues = req.getParameterMap();
                             for (Map.Entry<String, String[]> entry : paramValues.entrySet()) {
@@ -549,10 +661,13 @@ public class FrontServlet extends HttpServlet {
                             value = paramMap;
                         }
                     }
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 =======
                     // 1. VariableChemin
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
                     else if (p.isAnnotationPresent(VariableChemin.class)) {
                         VariableChemin ann = p.getAnnotation(VariableChemin.class);
                         String key = ann.value().isEmpty() ? p.getName() : ann.value();
@@ -562,10 +677,13 @@ public class FrontServlet extends HttpServlet {
                             throw new IllegalArgumentException("Paramètre de chemin manquant: " + key + " (type " + type.getSimpleName() + ")");
                         }
                     }
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 =======
                     // 2. ParametreRequete
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
                     else if (p.isAnnotationPresent(ParametreRequete.class)) {
                         ParametreRequete ann = p.getAnnotation(ParametreRequete.class);
                         String key = ann.value().isEmpty() ? p.getName() : ann.value();
@@ -575,6 +693,7 @@ public class FrontServlet extends HttpServlet {
                             throw new IllegalArgumentException("Paramètre de requête manquant: " + key + " (type " + type.getSimpleName() + ")");
                         }
                     }
+<<<<<<< Updated upstream
 <<<<<<< HEAD
                     else if (isCustomClass(type)) {
                         value = bindObject(type, req.getParameterMap());
@@ -586,6 +705,11 @@ public class FrontServlet extends HttpServlet {
                     }
                     // 3. Aucun annotation : priorité chemin > requête
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+                    else if (isCustomClass(type)) {
+                        value = bindObject(type, req.getParameterMap());
+                    }
+>>>>>>> Stashed changes
                     else {
                         String key = p.getName();
                         if (pathParams.containsKey(key)) {
@@ -621,10 +745,13 @@ public class FrontServlet extends HttpServlet {
         }
     }
 
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 =======
     // Détection classe personnalisée (hors String, Integer, Map, List, etc.)
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
     private boolean isCustomClass(Class<?> type) {
         return !type.isPrimitive()
             && !type.getName().startsWith("java.")
@@ -633,10 +760,13 @@ public class FrontServlet extends HttpServlet {
             && !List.class.isAssignableFrom(type);
     }
 
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 =======
     // Binding automatique d'objet complexe (récursif, gère listes et objets imbriqués)
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
     private Object bindObject(Class<?> clazz, Map<String, String[]> paramMap) {
         try {
             Object instance = clazz.getDeclaredConstructor().newInstance();
@@ -645,10 +775,13 @@ public class FrontServlet extends HttpServlet {
                 String prefix = clazz.getSimpleName() + "." + field.getName();
                 Class<?> fieldType = field.getType();
 
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 =======
                 // Gérer les listes
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
                 if (List.class.isAssignableFrom(fieldType)) {
                     String[] vals = paramMap.get(prefix);
                     if (vals != null) {
@@ -657,18 +790,24 @@ public class FrontServlet extends HttpServlet {
                         field.set(instance, list);
                     }
                 }
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 =======
                 // Gérer les objets imbriqués
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
                 else if (isCustomClass(fieldType)) {
                     Object subObj = bindObject(fieldType, paramMap);
                     field.set(instance, subObj);
                 }
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 =======
                 // Attribut simple
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
                 else {
                     String[] vals = paramMap.get(prefix);
                     if (vals != null && vals.length > 0) {
@@ -683,10 +822,13 @@ public class FrontServlet extends HttpServlet {
         }
     }
 
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 =======
     // Traiter le résultat retourné par la méthode
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
     private void handleResult(Object result, String path, HttpServletRequest req, HttpServletResponse res) throws IOException, ServletException {
         if (result == null) {
             res.setContentType("text/plain; charset=UTF-8");
@@ -705,10 +847,13 @@ public class FrontServlet extends HttpServlet {
             return;
         }
 
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 =======
         // Ajout : gestion JSON
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
         Method calledMethod = (Method) req.getAttribute("calledMethod");
         boolean isJson = false;
         if (calledMethod != null && calledMethod.isAnnotationPresent(framework.annotation.Json.class)) {
@@ -722,10 +867,13 @@ public class FrontServlet extends HttpServlet {
             return;
         }
 
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 =======
         // Autres types (int, etc.)
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
         res.setContentType("text/plain; charset=UTF-8");
         res.getWriter().println("Résultat (" + result.getClass().getSimpleName() + "): " + result);
     }
@@ -736,6 +884,7 @@ public class FrontServlet extends HttpServlet {
         if (target == int.class || target == Integer.class) return Integer.parseInt(s);
         if (target == long.class || target == Long.class) return Long.parseLong(s);
         if (target == boolean.class || target == Boolean.class) return Boolean.parseBoolean(s);
+<<<<<<< Updated upstream
 <<<<<<< HEAD
         return s;
     }
@@ -747,6 +896,11 @@ public class FrontServlet extends HttpServlet {
 
     // Ajoute une méthode utilitaire pour formatter la réponse JSON
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+        return s;
+    }
+
+>>>>>>> Stashed changes
     private String toJsonResponse(Object result) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\n");
@@ -779,10 +933,13 @@ public class FrontServlet extends HttpServlet {
         if (obj instanceof String || obj instanceof Number || obj instanceof Boolean) {
             return "\"" + obj.toString() + "\"";
         }
+<<<<<<< Updated upstream
 <<<<<<< HEAD
 =======
         // Simple POJO to JSON (fields only, no nested objects)
 >>>>>>> 0d7078ef541fa280d8e88e0e262fc53539a6046c
+=======
+>>>>>>> Stashed changes
         StringBuilder sb = new StringBuilder();
         sb.append("{");
         java.lang.reflect.Field[] fields = obj.getClass().getDeclaredFields();
