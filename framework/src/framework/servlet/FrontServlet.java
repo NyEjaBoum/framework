@@ -18,7 +18,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.HashMap;
+import jakarta.servlet.http.Part;
+import jakarta.servlet.annotation.MultipartConfig;
 
+@MultipartConfig // <-- AJOUTE CETTE LIGNE
 public class FrontServlet extends HttpServlet {
 
     RequestDispatcher defaultDispatcher;
@@ -66,26 +69,47 @@ public class FrontServlet extends HttpServlet {
                 Parameter[] params = method.getParameters();
                 Object[] invokedArgs = new Object[params.length];
 
+                // Récupération des fichiers uploadés
+                Map<String, byte[]> fileMap = new HashMap<>();
+                if (req.getContentType() != null && req.getContentType().toLowerCase().startsWith("multipart/")) {
+                    for (Part part : req.getParts()) {
+                        if (part.getSubmittedFileName() != null && !part.getSubmittedFileName().isEmpty()) {
+                            byte[] bytes = part.getInputStream().readAllBytes();
+                            fileMap.put(part.getName(), bytes);
+                        }
+                    }
+                }
+                // rendre accessible pour le binding et pour la JSP
+                req.setAttribute("fileMap", fileMap);
+
                 for (int i = 0; i < params.length; i++) {
                     Parameter p = params[i];
                     Class<?> type = p.getType();
                     Object value = null;
 
-                    // Injection automatique de tous les paramètres de requête dans Map<String,Object>
+                    // Injection du Map des fichiers : si un attribut "fileMap" est présent sur la requête, l'utiliser.
                     if (Map.class.isAssignableFrom(type)) {
-                        Map<String, Object> paramMap = new HashMap<>();
-                        Map<String, String[]> paramValues = req.getParameterMap();
-                        for (Map.Entry<String, String[]> entry : paramValues.entrySet()) {
-                            String key = entry.getKey();
-                            String[] vals = entry.getValue();
-                            if (vals == null) continue;
-                            if (vals.length == 1) {
-                                paramMap.put(key, vals[0]);
-                            } else {
-                                paramMap.put(key, vals);
+                        Object attr = req.getAttribute("fileMap");
+                        if (attr != null) {
+                            value = attr;
+                        } else if (p.getName().toLowerCase().contains("file") || p.getName().toLowerCase().contains("fichier")) {
+                            value = fileMap;
+                        } else {
+                            // Injection automatique de tous les paramètres de requête dans Map<String,Object>
+                            Map<String, Object> paramMap = new HashMap<>();
+                            Map<String, String[]> paramValues = req.getParameterMap();
+                            for (Map.Entry<String, String[]> entry : paramValues.entrySet()) {
+                                String key = entry.getKey();
+                                String[] vals = entry.getValue();
+                                if (vals == null) continue;
+                                if (vals.length == 1) {
+                                    paramMap.put(key, vals[0]);
+                                } else {
+                                    paramMap.put(key, vals);
+                                }
                             }
+                            value = paramMap;
                         }
-                        value = paramMap;
                     }
                     // 1. VariableChemin
                     else if (p.isAnnotationPresent(VariableChemin.class)) {
